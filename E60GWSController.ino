@@ -2,15 +2,23 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 #include <CAN.h>
+#include <Arduino.h>
+#include <BleGamepad.h>
+
+BleGamepad bleGamepad;
+
 unsigned long sinceLast100msLoop = 0;
 unsigned long sinceLast200msLoop = 0;
 unsigned long sinceLast1000msLoop = 0;
+unsigned long sinceLast5sLoop = 0;
 byte gearCounter = 0x0D;
-int gear = 0; //0 = P, 1 = R, 2 = N, 3 = D, 4 = M/S
-
+int gear = 0; //0 = P, 1 = R, 2 = N, 3 = D, 4 = M
+bool upshifting = false;
+bool downshifting = false;
 bool displayOutput = false;
 void setup() {
   Serial.begin(115200);
+  bleGamepad.begin();
   while (!Serial);
   CAN.setPins(25,26);
   Serial.println("BMW E60 GWS Controller");
@@ -29,6 +37,7 @@ void sendShifterAwake() {
     CAN.write(3);
     CAN.write(0);
     CAN.endPacket();
+    Serial.println("Shifter Awake Sent");
 }
 void nextGear() {
   sendGear();
@@ -55,37 +64,8 @@ void sendGear() {
         }
         Serial.println("Park Sent");
         break;
-     case 1: //Neutral
-        CAN.beginPacket(0x1D2);
-        CAN.write(0xB4);
-        CAN.write(0x0C);
-        CAN.write(0x08);
-        CAN.write(gearCounter);
-        CAN.write(0xCF);
-        CAN.endPacket();
-        gearCounter=gearCounter+0x10;
-        if (gearCounter==0xED)
-        {
-           gearCounter=0x0D;
-        }
-        Serial.println("Neutral Sent");
-        break;
-     case 2: //Drive
-        CAN.beginPacket(0x1D2);
-        CAN.write(0x78);
-        CAN.write(0x0C);
-        CAN.write(0x8F);
-        CAN.write(gearCounter);
-        CAN.write(0xF0);
-        CAN.endPacket();
-        gearCounter=gearCounter+0x10;
-        if (gearCounter==0xED)
-        {
-           gearCounter=0x0D;
-        }
-        Serial.println("Drive Sent");
-        break;
-     case 3: //Reverse
+     case 1: //Reverse
+        
         CAN.beginPacket(0x1D2);
         CAN.write(0xD2);
         CAN.write(0x0C);
@@ -100,6 +80,37 @@ void sendGear() {
         }
         Serial.println("Reverse Sent");
         break;
+     case 2: //Neutral
+        CAN.beginPacket(0x1D2);
+        CAN.write(0xB4);
+        CAN.write(0x0C);
+        CAN.write(0x08);
+        CAN.write(gearCounter);
+        CAN.write(0xCF);
+        CAN.endPacket();
+        gearCounter=gearCounter+0x10;
+        if (gearCounter==0xED)
+        {
+           gearCounter=0x0D;
+        }
+        Serial.println("Neutral Sent");
+        break;
+     case 3: //Drive
+        CAN.beginPacket(0x1D2);
+        CAN.write(0x78);
+        CAN.write(0x0C);
+        CAN.write(0x8F);
+        CAN.write(gearCounter);
+        CAN.write(0xF0);
+        CAN.endPacket();
+        gearCounter=gearCounter+0x10;
+        if (gearCounter==0xED)
+        {
+           gearCounter=0x0D;
+        }
+        Serial.println("Drive Sent");
+        break;
+        
      case 4:
         CAN.beginPacket(0x1D2);
         CAN.write(0x78);
@@ -120,6 +131,55 @@ void sendGear() {
 void loop() {
   unsigned long currentLoop = millis();
   String data;
+  bool sideButton = false;
+  if (bleGamepad.isConnected())
+    {
+        
+        
+        switch(gear) {
+          case 0:
+            bleGamepad.press(BUTTON_1);
+            Serial.println("Button 1 Down");
+            bleGamepad.release(BUTTON_1);
+            break;
+          case 1:
+            bleGamepad.press(BUTTON_2);
+            Serial.println("Button 2 Down");
+            bleGamepad.release(BUTTON_2);
+            break;
+          case 2: 
+            bleGamepad.press(BUTTON_3);
+            Serial.println("Button 3 Down");
+            bleGamepad.release(BUTTON_3);
+            break;
+          case 3:
+            bleGamepad.press(BUTTON_4);
+            Serial.println("Button 4 Down");
+            bleGamepad.release(BUTTON_4);
+            break;
+          case 4:
+            bleGamepad.press(BUTTON_5);
+            Serial.println("Button 5 Down");
+            bleGamepad.release(BUTTON_5);
+            break;
+        }
+        if(sideButton == true) {
+          bleGamepad.press(BUTTON_6);
+          Serial.println("Button 6 Down");
+          bleGamepad.release(BUTTON_6);
+        }
+        if(upshifting == true) {
+          bleGamepad.press(BUTTON_7);
+          Serial.println("Button 7 Down");
+          bleGamepad.release(BUTTON_7);
+        }
+        if(downshifting == true) {
+          bleGamepad.press(BUTTON_8);
+          Serial.println("Button 8 Down");
+          bleGamepad.release(BUTTON_8);
+        }
+        
+    }
   int packetSize = CAN.parsePacket();
   // check if data is available
   if (Serial.available() > 0) {
@@ -142,7 +202,7 @@ void loop() {
       Serial.println("0 or 1 to disable or enable output of can messages");
     }
   }
-  
+
   if (packetSize) {
     
     while (CAN.available()) {
@@ -180,30 +240,118 @@ void loop() {
     if(String(CAN.packetId(), HEX) == "198") {
       if(String(data[6]) == "5") {
         Serial.println("Park button pressed");
+        gear = 0;
       }
       if(String(data[5]) == "9") {
         Serial.println("Side Button Pressed");
+        sideButton = true;
       }
       if(String(data[2]) == "1") {
         Serial.println("Forward 1");
+        switch(gear) {
+          case 0: //p
+            gear = 2;
+            break;
+          case 1: //r
+            gear = 1;
+            Serial.println("Shifter in R but up recieved?");
+            break;
+          case 2: //n
+            if(sideButton == true) {
+              gear = 1;
+            }
+            else {
+              gear = 2;
+            }
+
+            break;
+          case 3: //d
+            gear = 2;
+            break;
+          case 4: //s
+            Serial.println("Shifter in Sport but up recieved?");
+            break;
+        }
+        
       }
       if(String(data[2]) == "2") {
         Serial.println("Forward 2");
+        switch(gear) {
+          case 0: //p
+            gear = 1;
+            break;
+          case 1: //r
+            gear = 1;
+            Serial.println("Shifter in R but up 2 recieved?");
+            break;
+          case 2: //n
+            gear = 1;
+            break;
+          case 3: //d
+            gear = 2;
+            break;
+          case 4: //s
+            Serial.println("Shifter in Sport but up recieved?");
+            break;
+        }
       }
       if(String(data[2]) == "3") {
         Serial.println("Backward 1");
+        
+        switch(gear) {
+          case 0: //p
+            gear = 3;
+            break;
+          case 1: //r
+            gear = 2;
+            break;
+          case 2: //n
+            gear = 2;
+            break;
+          case 3: //d
+            //do nothing
+            break;
+          case 4: //s
+            Serial.println("Shifter in Sport but back 1 recieved?");
+            break;
+        }
       }
       if(String(data[2]) == "4") {
         Serial.println("Backward 2");
+        switch(gear) {
+          case 0: //p
+            gear = 3;
+            break;
+          case 1: //r
+            gear = 2;
+            break;
+          case 2: //n
+            gear = 3;
+            break;
+          case 3: //d
+            //do nothing
+            break;
+          case 4: //s
+            Serial.println("Shifter in Sport but back 2 recieved?");
+            break;
+        }
       }
       if(String(data[2]) == "7") {
         Serial.println("Sport Mode Selected");
+        gear = 4;
       }
       if(String(data[2]) == "5") {
         Serial.println("Downshift");
+        downshifting = true;
+      }
+      else {
+        downshifting = false;
       }
       if(String(data[2]) == "6") {
         Serial.println("Upshift");
+      }
+      else {
+        upshifting = false;
       }
     }
     }
@@ -219,7 +367,11 @@ void loop() {
     }
     if (currentLoop - sinceLast1000msLoop > 1000) {
       sinceLast1000msLoop = currentLoop;
-      nextGear();
+
+    }
+    if (currentLoop - sinceLast5sLoop > 5000) {
+      sinceLast5sLoop = currentLoop;
+
     }
 
 }
